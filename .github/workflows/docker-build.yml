@@ -90,7 +90,7 @@ jobs:
 
   build_and_push:
     name: Build and Push Docker Image
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     needs: test
     runs-on: ubuntu-latest
     permissions:
@@ -125,7 +125,7 @@ jobs:
           images: |
             ghcr.io/community-valheim-tools/valheim-server
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=semver,pattern={{version}}
             type=sha
           labels: |
@@ -147,6 +147,7 @@ jobs:
           cache-from: type=gha
 
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           gh release create "${{ github.ref_name }}" --generate-notes --notes-start-tag "$(cat <<'EOF'
           ## Container Image
