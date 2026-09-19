@@ -79,6 +79,7 @@ to e.g.
  `$HOME/valheim-server/config/worlds_local`
 and run the image with `$HOME/valheim-server/config` volume mounted to `/config` inside the container.
 The container directory `/opt/valheim` contains the downloaded server. It can optionally be volume mounted to avoid having to download the server on each fresh start.
+It also holds SteamCMD's depot manifest cache (`/opt/valheim/dl/depotcache`), which SteamCMD needs to update an existing installation after Valheim was updated on Steam, so the cache stays in sync with the installation it belongs to.
 
 ```
 $ mkdir -p $HOME/valheim-server/config/worlds_local $HOME/valheim-server/data
@@ -456,6 +457,10 @@ $ sudo nomad job run /var/lib/valheim/valheim.nomad
 By default the container will check for Valheim server updates every 15 minutes if no players are currently connected to the server.
 If an update is found it is downloaded and the server restarted.
 This update schedule can be changed using the `UPDATE_CRON` environment variable.
+
+If Steam denies access to the installed depot manifest (`Error! App '896660' state is 0x6 after update job.`),
+the updater moves `appmanifest_896660.acf` aside (kept as `appmanifest_896660.acf.denied`) and retries once
+with validation. Failed downloads leave the separate installed game unchanged.
 
 # Crossplay
 
