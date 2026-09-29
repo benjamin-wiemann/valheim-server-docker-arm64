@@ -1,3 +1,8 @@
+# Set automatically by BuildKit when building for a specific platform
+# (e.g. docker buildx build --platform linux/arm64). Selects the
+# architecture specific handling of the final image stage below.
+ARG TARGETARCH
+
 FROM debian:trixie-slim AS build-env
 ENV DEBIAN_FRONTEND=noninteractive
 ARG TESTS
@@ -12,10 +17,16 @@ RUN apt-get update
 RUN apt-get -y install apt-utils
 RUN apt-get -y install build-essential curl git python3 python3-pip python3-venv shellcheck
 
-# Install Go 1.24 manually
-RUN curl -L -o /tmp/go${GO_VERSION}.linux-amd64.tar.gz https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz \
-    && tar -C /usr/local -xzf /tmp/go${GO_VERSION}.linux-amd64.tar.gz \
-    && rm /tmp/go${GO_VERSION}.linux-amd64.tar.gz
+# Install Go 1.24 manually (build host architecture aware)
+RUN set -eu; \
+    case "$(uname -m)" in \
+        x86_64) goarch=amd64 ;; \
+        aarch64) goarch=arm64 ;; \
+        *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    curl -L -o /tmp/go${GO_VERSION}.tar.gz "https://go.dev/dl/go${GO_VERSION}.linux-${goarch}.tar.gz" \
+    && tar -C /usr/local -xzf /tmp/go${GO_VERSION}.tar.gz \
+    && rm /tmp/go${GO_VERSION}.tar.gz
 ENV PATH=$PATH:/usr/local/go/bin
 ENV GOPATH=/go
 ENV PATH=$PATH:$GOPATH/bin
@@ -65,6 +76,7 @@ COPY valheim-updater /usr/local/bin/
 COPY valheim-plus-updater /usr/local/bin/
 COPY bepinex-updater /usr/local/bin/
 COPY valheim-server /usr/local/bin/
+COPY box64.sh /usr/local/bin/box64
 COPY defaults /usr/local/etc/valheim/
 COPY common /usr/local/etc/valheim/
 COPY contrib/* /usr/local/share/valheim/contrib/
@@ -72,6 +84,7 @@ RUN chmod 755 /usr/local/sbin/bootstrap /usr/local/bin/valheim-*
 RUN if [ "${TESTS:-true}" = true ]; then \
     shellcheck -a -x -s bash -e SC2034 \
     /usr/local/sbin/bootstrap \
+    /usr/local/bin/box64 \
     /usr/local/bin/valheim-tests \
     /usr/local/bin/valheim-backup \
     /usr/local/bin/valheim-is-idle \
@@ -112,13 +125,74 @@ RUN sed -i -E 's/(deb|security).debian.org/archive.debian.org/g' /etc/apt/source
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 
-FROM debian:trixie-slim
-ENV DEBIAN_FRONTEND=noninteractive
-COPY --from=build-env /usr/local/ /usr/local/
+# The 32-bit x86 libraries are only needed in the amd64 image, where
+# steamcmd runs natively. On arm64 steamcmd is executed through box64's
+# box32 mode, which wraps all required libraries, so the arm64 libs stage
+# stays (almost) empty. BuildKit only builds the stage chain that the
+# selected TARGETARCH actually references, so arm64 builds never have to
+# emulate the linux/386 stage above.
+FROM scratch AS libs-arm64
+# Placeholder file so this nearly empty stage can be COPYed from
+COPY --from=build-env /usr/local/etc/git-commit.HEAD /placeholder
+
+FROM scratch AS libs-amd64
 COPY --from=i386-libs /lib/ld-linux.so.2 /lib/ld-linux.so.2
 COPY --from=i386-libs /lib/i386-linux-gnu /lib/i386-linux-gnu
 COPY --from=i386-libs /usr/lib/i386-linux-gnu /usr/lib/i386-linux-gnu
+
+FROM libs-${TARGETARCH} AS libs
+
+
+FROM debian:trixie-slim
+ENV DEBIAN_FRONTEND=noninteractive
+COPY --from=build-env /usr/local/ /usr/local/
 COPY fake-supervisord /usr/bin/supervisord
+# box64 launcher wrapper used on arm64 to run the x86_64 server binary and
+# the 32-bit x86 steamcmd binary through emulation. Unused on amd64.
+COPY box64.sh /usr/local/bin/box64
+
+# Copy the 32-bit x86 libraries (amd64 only) into the image. Debian trixie
+# uses merged /usr, so /lib is a symlink to /usr/lib and the library files
+# have to be copied through it rather than replacing it. On arm64 the libs
+# stage is empty and this is a no-op - box64 provides everything steamcmd
+# needs on arm64.
+RUN --mount=type=bind,from=libs,target=/mnt/libs \
+    if [ -e /mnt/libs/lib ]; then cp -a /mnt/libs/lib/. /lib/; fi; \
+    if [ -e /mnt/libs/usr ]; then cp -a /mnt/libs/usr/. /usr/; fi
+
+# On arm64 hosts, install box64 (with its integrated box32 mode) so the
+# x86_64 Valheim server binary and the 32-bit x86 steamcmd binary can run
+# on 64-bit ARM hosts such as the Raspberry Pi 4. Alongside the generic
+# build, dynarec builds tuned for various Raspberry Pi models are
+# installed. One is selected at runtime via ARM64_DEVICE (see box64.sh).
+# This is a no-op on amd64, where all binaries run natively.
+RUN set -eu; \
+    if [ "$(dpkg --print-architecture)" != "arm64" ]; then \
+        echo "$(dpkg --print-architecture) image - running x86 binaries natively"; \
+    else \
+        apt-get update; \
+        apt-get -y --no-install-recommends install ca-certificates curl gnupg; \
+        curl -fsSL https://ryanfortner.github.io/box64-debs/KEY.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/box64-debs-archive-keyring.gpg; \
+        echo "deb [signed-by=/etc/apt/trusted.gpg.d/box64-debs-archive-keyring.gpg] https://ryanfortner.github.io/box64-debs/ ./" > /etc/apt/sources.list.d/box64.list; \
+        apt-get update; \
+        mkdir -p /tmp/box64dl; \
+        cd /tmp/box64dl; \
+        for variant in generic:box64 rpi3:box64-rpi3arm64 rpi4:box64-rpi4arm64 rpi5:box64-rpi5arm64; do \
+            name="${variant%%:*}"; \
+            pkg="${variant##*:}"; \
+            apt-get download "$pkg"; \
+            dpkg-deb -x "${pkg}"_*.deb extract; \
+            cp extract/usr/local/bin/box64 "/usr/local/bin/box64-${name}"; \
+            if [ -f extract/usr/local/bin/box64-bash ]; then cp extract/usr/local/bin/box64-bash "/usr/local/bin/box64-bash-${name}"; fi; \
+            rm -rf extract "${pkg}"_*.deb; \
+        done; \
+        cd /; \
+        rm -rf /tmp/box64dl; \
+        printf '[steamcmd]\nBOX64_DYNAREC_BIGBLOCK=3\nBOX64_DYNAREC_CALLRET=2\nBOX64_DYNAREC_STRONGMEM=1\n' >> /etc/box64.box64rc; \
+        apt-get clean; \
+        rm -rf /var/lib/apt/lists/*; \
+    fi; \
+    chmod 755 /usr/local/bin/box64
 
 RUN groupadd -g "${PGID:-0}" -o valheim \
     && useradd -g "${PGID:-0}" -u "${PUID:-0}" -o --create-home valheim \
@@ -189,9 +263,34 @@ RUN groupadd -g "${PGID:-0}" -o valheim \
     /opt/steamcmd/linux32/steamerrorreporter \
     /usr/bin/supervisord \
     && cd "/opt/steamcmd" \
-    && su - valheim -c "/opt/steamcmd/steamcmd.sh +login anonymous +quit" \
+    && steamcmd_bootstrap_rc=0 \
+    && if [ "$(dpkg --print-architecture)" = "arm64" ]; then \
+           su - valheim -c "DEBUGGER=/usr/local/bin/box64 /opt/steamcmd/steamcmd.sh +login anonymous +quit" || steamcmd_bootstrap_rc=$?; \
+       else \
+           su - valheim -c "/opt/steamcmd/steamcmd.sh +login anonymous +quit" || steamcmd_bootstrap_rc=$?; \
+       fi \
+    && case "$steamcmd_bootstrap_rc" in \
+           0|134|139) echo "steamcmd bootstrap exited with $steamcmd_bootstrap_rc (134/139 are steamcmd's well-known crash-after-success exit codes) - continuing" ;; \
+           *) exit "$steamcmd_bootstrap_rc" ;; \
+       esac \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && date --utc --iso-8601=seconds > /usr/local/etc/build.date
+
+# arm64: place steamcmd's steamclient.so where box64/box32 look for it,
+# both in the emulated library paths and in the ~/.steam/sdk* paths that
+# steamclient consumers use. No-op on amd64.
+RUN set -eu; \
+    if [ "$(dpkg --print-architecture)" = "arm64" ]; then \
+        mkdir -p /usr/lib/box64-x86_64-linux-gnu /usr/lib/box64-i386-linux-gnu \
+            /usr/lib/x86_64-linux-gnu /usr/lib/i386-linux-gnu; \
+        ln -sf /opt/steamcmd/linux64/steamclient.so /usr/lib/x86_64-linux-gnu/steamclient.so; \
+        ln -sf /opt/steamcmd/linux64/steamclient.so /usr/lib/box64-x86_64-linux-gnu/steamclient.so; \
+        ln -sf /opt/steamcmd/linux32/steamclient.so /usr/lib/i386-linux-gnu/steamclient.so; \
+        ln -sf /opt/steamcmd/linux32/steamclient.so /usr/lib/box64-i386-linux-gnu/steamclient.so; \
+        mkdir -p /home/valheim/.steam/sdk32 /home/valheim/.steam/sdk64; \
+        ln -sf /opt/steamcmd/linux32/steamclient.so /home/valheim/.steam/sdk32/steamclient.so; \
+        ln -sf /opt/steamcmd/linux64/steamclient.so /home/valheim/.steam/sdk64/steamclient.so; \
+    fi
 
 EXPOSE 2456-2458/udp
 EXPOSE 9001/tcp

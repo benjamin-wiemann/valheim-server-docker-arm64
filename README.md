@@ -1,9 +1,9 @@
-# ghcr.io/community-valheim-tools/valheim-server Container image
+# ghcr.io/benjamin-wiemann/valheim-server-docker-arm64 Container image
 
 ![Valheim](https://raw.githubusercontent.com/community-valheim-tools/valheim-server-docker/main/misc/Logo_valheim.png "Valheim")
 
 Valheim Server in a Docker Container (with [BepInEx](#bepinexpack-valheim) and [ValheimPlus](#valheimplus) support)  
-This project is hosted at [https://github.com/community-valheim-tools/valheim-server-docker](https://github.com/community-valheim-tools/valheim-server-docker)
+This is a fork of [https://github.com/community-valheim-tools/valheim-server-docker](https://github.com/community-valheim-tools/valheim-server-docker), hosted at [https://github.com/benjamin-wiemann/valheim-server-docker-arm64](https://github.com/benjamin-wiemann/valheim-server-docker-arm64), that additionally publishes `linux/arm64` images so the server runs on 64-bit ARM hosts such as the Raspberry Pi 4 (see [ARM64 (Raspberry Pi)](#arm64-raspberry-pi)).
 
 # Table of contents
 
@@ -21,6 +21,7 @@ This project is hosted at [https://github.com/community-valheim-tools/valheim-se
       - [Notify on Discord](#notify-on-discord)
   - [Mod config from Environment Variables](#mod-config-from-environment-variables)
 - [System requirements](#system-requirements)
+- [ARM64 (Raspberry Pi)](#arm64-raspberry-pi)
 - [Deployment](#deployment)
   - [Deploying with Docker and systemd](#deploying-with-docker-and-systemd)
   - [Deploying with docker compose](#deploying-with-docker-compose)
@@ -69,7 +70,7 @@ This project is hosted at [https://github.com/community-valheim-tools/valheim-se
 
 # Basic Docker Usage
 
-The name of the container image is `ghcr.io/community-valheim-tools/valheim-server`.
+The name of the container image is `ghcr.io/benjamin-wiemann/valheim-server-docker-arm64` (available for `linux/amd64` and `linux/arm64`). Users on amd64 hosts who don't need arm64 support may prefer the upstream image `ghcr.io/community-valheim-tools/valheim-server`.
 
 Volume mount the server config directory to `/config` within the Docker container.
 
@@ -384,6 +385,27 @@ The picture changes when players connect. The first player increased overall loa
 
 Therefore our minimum requirements would be a dual core system with 4 GB of RAM and our recommended system would be a high clocked 4 core server with 8 GB of RAM. A few very high clocked cores will be more beneficial than having many cores. I.e. two 5 GHz cores will yield better performance than six 2 GHz cores.
 This holds especially true the more players are connected to the system.
+
+# ARM64 (Raspberry Pi)
+
+This fork publishes a multi-arch image for `linux/amd64` and `linux/arm64`. On arm64 the downloaded x86_64 Valheim server binary and the 32-bit x86 steamcmd binary are transparently run through [box64](https://github.com/ptitSeb/box64) (steamcmd via box64's integrated box32 mode), so all features — automatic updates, backups, scheduled restarts, the status web server, event hooks, ValheimPlus and BepInEx — work the same as on amd64. The emulation approach is the same battle-tested one used by other ARM64 game server images such as [sonroyaalmerol/steamcmd-arm64](https://github.com/sonroyaalmerol/steamcmd-arm64).
+
+Notes for running on a Raspberry Pi 4:
+
+* The image ships box64 dynarec builds for Raspberry Pi 3/4/5 alongside the generic build. Select the one matching your device via the `ARM64_DEVICE` environment variable, e.g. `-e ARM64_DEVICE=rpi4` for a Raspberry Pi 4. If unset or unknown, the generic build is used.
+* box64 can be tuned through its `BOX64_*` environment variables, e.g. trade performance for stability with `-e BOX64_DYNAREC_STRONGMEM=2`. See the [box64 usage docs](https://github.com/ptitSeb/box64/blob/main/docs/USAGE.md) for all options.
+* Expect the emulated server to use noticeably more CPU than on an amd64 host. A Raspberry Pi 4 with 8 GB is recommended; the 4 GB model works but is tight, as the idle server alone consumes around 2.8 GB RSS.
+* First startup and every server update are considerably slower than on amd64, since steamcmd itself also runs under emulation.
+* **amd64 only:** the amd64 image runs the 32-bit x86 steamcmd binary natively. If your host has a `qemu-i386` `binfmt_misc` handler registered with the fix-binary flag (e.g. via `docker run --privileged --rm tonistiigi/binfmt --install all`, which some cross-arch build setups install), it hijacks native 32-bit execution and makes steamcmd segfault at `Loading Steam API...`. Remove it with `docker run --privileged --rm tonistiigi/binfmt --uninstall i386`. The arm64 image is unaffected - its steamcmd runs through box64.
+* Mod support (ValheimPlus/BepInEx) on arm64 goes through the same Unix doorstop mechanism as on amd64, but is considered best-effort — if you run into problems, try `VALHEIM_PLUS=false`/`BEPINEX=false` first.
+
+Building the image yourself is fastest directly on an arm64 host, where no cross-architecture emulation is required:
+
+```
+$ git clone https://github.com/benjamin-wiemann/valheim-server-docker-arm64.git
+$ cd valheim-server-docker-arm64
+$ docker buildx build --platform linux/arm64 -t valheim-server-arm64 --load .
+```
 
 # Deployment
 

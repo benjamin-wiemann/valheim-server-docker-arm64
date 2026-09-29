@@ -54,6 +54,17 @@ valheim_server_pidfile=/var/run/valheim/valheim-server.pid
 valheim_updater_pidfile=/var/run/valheim/valheim-updater.pid
 valheim_backup_pidfile=/var/run/valheim/valheim-backup.pid
 
+# Architecture detection
+# On arm64 hosts the x86_64 valheim_server binary and the 32-bit x86
+# steamcmd binary run through box64 (steamcmd via box64's box32 mode).
+# On amd64 both run natively and no wrapper is used.
+valheim_arch=$(uname -m)
+if [ "$valheim_arch" = "aarch64" ]; then
+    valheim_exec_wrapper=/usr/local/bin/box64
+else
+    valheim_exec_wrapper=""
+fi
+
 # Supervisor config files
 supervisor_http_server_conf=/usr/local/etc/supervisor/conf.d/http_server.conf
 

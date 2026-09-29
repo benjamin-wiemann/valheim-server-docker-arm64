@@ -209,8 +209,19 @@ run_steamcmd() {
     pkill -TERM steamcmd || true
     sleep 1
     pkill -KILL steamcmd || true
+    local steamcmd_platform_args=""
+    if [ "$valheim_arch" = "aarch64" ]; then
+        # steamcmd.sh prepends $DEBUGGER to the 32-bit x86 steamcmd binary,
+        # which our box64 wrapper then runs in box32 mode. The wrapper also
+        # translates steamcmd's benign crash-after-success exit codes
+        # (134/139) to 0 - see https://github.com/sonroyaalmerol/steamcmd-arm64
+        export DEBUGGER="$valheim_exec_wrapper"
+        # Force the linux platform so the x86_64 server binaries are
+        # downloaded even though uname reports aarch64.
+        steamcmd_platform_args="+@sSteamCmdForcePlatformType linux"
+    fi
     # shellcheck disable=SC2086
-    /opt/steamcmd/steamcmd.sh +force_install_dir "$valheim_download_path" +login anonymous +app_update "$valheim_appid" $STEAMCMD_ARGS "$@" +quit
+    /opt/steamcmd/steamcmd.sh $steamcmd_platform_args +force_install_dir "$valheim_download_path" +login anonymous +app_update "$valheim_appid" $STEAMCMD_ARGS "$@" +quit
 }
 
 

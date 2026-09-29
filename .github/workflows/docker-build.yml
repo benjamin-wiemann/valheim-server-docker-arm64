@@ -116,7 +116,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/community-valheim-tools/valheim-server
+            ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=semver,pattern={{version}}
@@ -125,14 +125,14 @@ jobs:
             org.opencontainers.image.title=valheim-server
             org.opencontainers.image.description=Valheim Server
             org.opencontainers.image.licenses=Apache-2.0
-            org.opencontainers.image.source=https://github.com/community-valheim-tools/valheim-server-docker
-            org.opencontainers.image.documentation=https://github.com/community-valheim-tools/valheim-server-docker/blob/main/README.md
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.documentation=${{ github.server_url }}/${{ github.repository }}/blob/main/README.md
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           build-args: SOURCE_COMMIT=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -144,7 +144,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           GENERATED_NOTES=$(gh api "repos/${{ github.repository }}/releases/generate-notes" -f tag_name="${{ github.ref_name }}" -q .body)
-          printf '## Container Image\n```\ndocker pull ghcr.io/community-valheim-tools/valheim-server:%s\n```\n\n%s\n' "${{ steps.meta.outputs.version }}" "$GENERATED_NOTES" > release-notes.md
+          printf '## Container Image\n```\ndocker pull ghcr.io/${{ github.repository }}:%s\n```\n\n%s\n' "${{ steps.meta.outputs.version }}" "$GENERATED_NOTES" > release-notes.md
           gh release create "${{ github.ref_name }}" --notes-file release-notes.md
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
