@@ -147,9 +147,14 @@ FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive
 COPY --from=build-env /usr/local/ /usr/local/
 COPY fake-supervisord /usr/bin/supervisord
-# box64 launcher wrapper used on arm64 to run the x86_64 server binary and
-# the 32-bit x86 steamcmd binary through emulation. Unused on amd64.
+# box64 launcher wrapper used on arm64 to run the x86_64 server binary
+# (steamcmd uses the box86 wrapper below). Unused on amd64.
 COPY box64.sh /usr/local/bin/box64
+# box86 launcher wrapper used on arm64 to run the 32-bit x86 steamcmd
+# binary (box64's box32 mode breaks steamcmd's TLS connections on CPUs
+# without ARM crypto extensions, see
+# https://github.com/ptitSeb/box64/issues/4206). Unused on amd64.
+COPY box86.sh /usr/local/bin/box86
 
 # Copy the 32-bit x86 libraries (amd64 only) into the image. Debian trixie
 # uses merged /usr, so /lib is a symlink to /usr/lib and the library files
@@ -170,10 +175,13 @@ RUN set -eu; \
     if [ "$(dpkg --print-architecture)" != "arm64" ]; then \
         echo "$(dpkg --print-architecture) image - running x86 binaries natively"; \
     else \
+        dpkg --add-architecture armhf; \
         apt-get update; \
-        apt-get -y --no-install-recommends install ca-certificates curl gnupg; \
+        apt-get -y --no-install-recommends install ca-certificates curl gnupg libc6:armhf; \
         curl -fsSL https://ryanfortner.github.io/box64-debs/KEY.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/box64-debs-archive-keyring.gpg; \
-        echo "deb [signed-by=/etc/apt/trusted.gpg.d/box64-debs-archive-keyring.gpg] https://ryanfortner.github.io/box64-debs/ ./" > /etc/apt/sources.list.d/box64.list; \
+        echo "deb [signed-by=/etc/apt/trusted.gpg.d/box64-debs-archive-keyring.gpg] https://ryanfortner.github.io/box64-debs/debian ./" > /etc/apt/sources.list.d/box64.list; \
+        curl -fsSL https://ryanfortner.github.io/box86-debs/KEY.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/box86-debs-archive-keyring.gpg; \
+        echo "deb [arch=armhf signed-by=/etc/apt/trusted.gpg.d/box86-debs-archive-keyring.gpg] https://ryanfortner.github.io/box86-debs/debian ./" > /etc/apt/sources.list.d/box86.list; \
         apt-get update; \
         mkdir -p /tmp/box64dl; \
         cd /tmp/box64dl; \
@@ -186,13 +194,22 @@ RUN set -eu; \
             if [ -f extract/usr/local/bin/box64-bash ]; then cp extract/usr/local/bin/box64-bash "/usr/local/bin/box64-bash-${name}"; fi; \
             rm -rf extract "${pkg}"_*.deb; \
         done; \
+        for variant in generic:box86-generic-arm rpi3:box86-rpi3arm64 rpi4:box86-rpi4arm64; do \
+            name="${variant%%:*}"; \
+            pkg="${variant##*:}"; \
+            apt-get download "${pkg}:armhf"; \
+            dpkg-deb -x "${pkg}"_*.deb extract; \
+            cp extract/usr/local/bin/box86 "/usr/local/bin/box86-${name}"; \
+            rm -rf extract "${pkg}"_*.deb; \
+        done; \
         cd /; \
         rm -rf /tmp/box64dl; \
         printf '[steamcmd]\nBOX64_DYNAREC_BIGBLOCK=3\nBOX64_DYNAREC_CALLRET=2\nBOX64_DYNAREC_STRONGMEM=1\n' >> /etc/box64.box64rc; \
+        printf '[steamcmd]\nBOX86_DYNAREC_BIGBLOCK=3\nBOX86_DYNAREC_CALLRET=2\nBOX86_DYNAREC_STRONGMEM=1\n' >> /etc/box86.box86rc; \
         apt-get clean; \
         rm -rf /var/lib/apt/lists/*; \
     fi; \
-    chmod 755 /usr/local/bin/box64
+    chmod 755 /usr/local/bin/box64 /usr/local/bin/box86
 
 RUN groupadd -g "${PGID:-0}" -o valheim \
     && useradd -g "${PGID:-0}" -u "${PUID:-0}" -o --create-home valheim \
@@ -265,7 +282,7 @@ RUN groupadd -g "${PGID:-0}" -o valheim \
     && cd "/opt/steamcmd" \
     && steamcmd_bootstrap_rc=0 \
     && if [ "$(dpkg --print-architecture)" = "arm64" ]; then \
-           su - valheim -c "DEBUGGER=/usr/local/bin/box64 /opt/steamcmd/steamcmd.sh +login anonymous +quit" || steamcmd_bootstrap_rc=$?; \
+           su - valheim -c "STEAM_PLATFORM=linux32 DEBUGGER=/usr/local/bin/box86 /opt/steamcmd/steamcmd.sh +login anonymous +quit" || steamcmd_bootstrap_rc=$?; \
        else \
            su - valheim -c "/opt/steamcmd/steamcmd.sh +login anonymous +quit" || steamcmd_bootstrap_rc=$?; \
        fi \

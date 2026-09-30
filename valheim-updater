@@ -212,10 +212,16 @@ run_steamcmd() {
     local steamcmd_platform_args=""
     if [ "$valheim_arch" = "aarch64" ]; then
         # steamcmd.sh prepends $DEBUGGER to the 32-bit x86 steamcmd binary,
-        # which our box64 wrapper then runs in box32 mode. The wrapper also
-        # translates steamcmd's benign crash-after-success exit codes
+        # which our box86 wrapper then runs (box64's box32 mode breaks
+        # steamcmd's TLS connections on CPUs without ARM crypto extensions,
+        # see https://github.com/ptitSeb/box64/issues/4206). The wrapper
+        # also translates steamcmd's benign crash-after-success exit codes
         # (134/139) to 0 - see https://github.com/sonroyaalmerol/steamcmd-arm64
-        export DEBUGGER="$valheim_exec_wrapper"
+        export DEBUGGER="$valheim_steamcmd_wrapper"
+        # Recent steamcmd.sh versions pick the client directory from
+        # STEAM_PLATFORM (defaulting to linuxarm64 on aarch64, which the
+        # steamcmd tarball does not ship). Force the 32-bit x86 client.
+        export STEAM_PLATFORM=linux32
         # Force the linux platform so the x86_64 server binaries are
         # downloaded even though uname reports aarch64.
         steamcmd_platform_args="+@sSteamCmdForcePlatformType linux"

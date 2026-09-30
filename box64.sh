@@ -10,6 +10,15 @@
 # Adapted from sonroyaalmerol/steamcmd-arm64 (MIT licensed)
 # https://github.com/sonroyaalmerol/steamcmd-arm64
 
+# Workaround for https://github.com/ptitSeb/box64/issues/4206: box64
+# advertises the x86 AES-NI/PCLMULQDQ/SHA extensions to emulated binaries
+# even when its software fallback produces wrong results - which is the
+# case on CPUs that lack the matching ARM crypto extensions, such as the
+# Cortex-A72 of the Raspberry Pi 4. Emulated TLS connections then fail
+# (steamcmd: "needs to be online", http error 0). Disabling the extensions
+# makes emulated binaries use their software implementations instead.
+export BOX64_AES=0 BOX64_PCLMULQDQ=0 BOX64_SHAEXT=0
+
 ARM64_DEVICE="${ARM64_DEVICE:-generic}"
 
 case "$ARM64_DEVICE" in
