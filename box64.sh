@@ -19,6 +19,14 @@
 # makes emulated binaries use their software implementations instead.
 export BOX64_AES=0 BOX64_PCLMULQDQ=0 BOX64_SHAEXT=0
 
+# Search path for emulated (x86_64) libraries that box64 cannot wrap, and
+# preload of the ones libparty.so expects to find in the global namespace
+# (it carries no DT_NEEDED entries for them). See
+# https://github.com/ptitSeb/box64/issues/4206 and the Dockerfile for
+# how these libraries are provisioned.
+export BOX64_LD_LIBRARY_PATH=/usr/lib/box64-x86_64-linux-gnu
+export BOX64_LD_PRELOAD=/usr/lib/box64-x86_64-linux-gnu/libogg.so.0:/usr/lib/box64-x86_64-linux-gnu/libvorbis.so.0
+
 ARM64_DEVICE="${ARM64_DEVICE:-generic}"
 
 case "$ARM64_DEVICE" in

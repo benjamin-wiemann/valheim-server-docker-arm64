@@ -202,6 +202,18 @@ RUN set -eu; \
             cp extract/usr/local/bin/box86 "/usr/local/bin/box86-${name}"; \
             rm -rf extract "${pkg}"_*.deb; \
         done; \
+        mkdir -p /usr/lib/box64-x86_64-linux-gnu; \
+        curl -fsSL -o /tmp/libgcc.deb "http://deb.debian.org/debian/pool/main/g/gcc-14/libgcc-s1_14.2.0-19_amd64.deb"; \
+        curl -fsSL -o /tmp/libstdc.deb "http://deb.debian.org/debian/pool/main/g/gcc-14/libstdc++6_14.2.0-19_amd64.deb"; \
+        curl -fsSL -o /tmp/libogg.deb "http://deb.debian.org/debian/pool/main/libo/libogg/libogg0_1.3.4-0.1_amd64.deb"; \
+        curl -fsSL -o /tmp/libvorbis0.deb "http://deb.debian.org/debian/pool/main/libv/libvorbis/libvorbis0a_1.3.7-1_amd64.deb"; \
+        curl -fsSL -o /tmp/libvorbisenc.deb "http://deb.debian.org/debian/pool/main/libv/libvorbis/libvorbisenc2_1.3.7-1_amd64.deb"; \
+        curl -fsSL -o /tmp/libvorbisfile.deb "http://deb.debian.org/debian/pool/main/libv/libvorbis/libvorbisfile3_1.3.7-1_amd64.deb"; \
+        for d in /tmp/libgcc.deb /tmp/libstdc.deb /tmp/libogg.deb /tmp/libvorbis0.deb /tmp/libvorbisenc.deb /tmp/libvorbisfile.deb; do \
+            dpkg-deb -x "$d" /tmp/xextract; \
+        done; \
+        cp -a /tmp/xextract/usr/lib/x86_64-linux-gnu/. /usr/lib/box64-x86_64-linux-gnu/; \
+        rm -rf /tmp/*.deb /tmp/xextract; \
         cd /; \
         rm -rf /tmp/box64dl; \
         printf '[steamcmd]\nBOX64_DYNAREC_BIGBLOCK=3\nBOX64_DYNAREC_CALLRET=2\nBOX64_DYNAREC_STRONGMEM=1\n' >> /etc/box64.box64rc; \
